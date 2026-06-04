@@ -61,11 +61,18 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Zip extensions
+        run: |
+          zip -r dist/chrome-extension.zip chrome-extension/
+          zip -r dist/firefox-extension.zip firefox-extension/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
             dist/article-to-pdf-host-*
+            dist/chrome-extension.zip
+            dist/firefox-extension.zip
             install.sh
             uninstall.sh
           generate_release_notes: true

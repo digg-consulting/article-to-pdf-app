@@ -17,14 +17,20 @@ This downloads a pre-built binary for your platform, places it in `~/.local/bin`
 
 ### Step 2 — Load the extension
 
+Download the extension for your browser from the [latest release](https://github.com/digg-consulting/article-to-pdf-app/releases/latest):
+- **Chrome:** `chrome-extension.zip`
+- **Firefox:** `firefox-extension.zip`
+
+Unzip the downloaded file, then:
+
 **Chrome / Chromium:**
 1. Open `chrome://extensions`
 2. Enable **Developer mode** (top-right toggle)
-3. Click **Load unpacked** → select the `chrome-extension/` folder
+3. Click **Load unpacked** → select the unzipped `chrome-extension/` folder
 
 **Firefox:**
 1. Open `about:debugging#/runtime/this-firefox`
-2. Click **Load Temporary Add-on** → select `firefox-extension/manifest.json`
+2. Click **Load Temporary Add-on** → select `manifest.json` inside the unzipped `firefox-extension/` folder
 
 That's it. No extension ID to copy, no config files to edit.
 
