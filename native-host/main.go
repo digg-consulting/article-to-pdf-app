@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -187,6 +188,7 @@ func generatePDF(rawURL string) (string, error) {
 	defer cancelTimeout()
 
 	var pdfBuf []byte
+	var pageTitle string
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(rawURL),
 		// Wait for network to settle so dynamic content (Substack, Medium, etc.) is fully rendered.
@@ -194,6 +196,7 @@ func generatePDF(rawURL string) (string, error) {
 			return chromedp.WaitReady("body", chromedp.ByQuery).Do(ctx)
 		}),
 		chromedp.Sleep(2*time.Second),
+		chromedp.Title(&pageTitle),
 		chromedp.Evaluate(prepareArticleJS, nil),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			buf, _, err := page.PrintToPDF().
@@ -216,10 +219,9 @@ func generatePDF(rawURL string) (string, error) {
 		return "", fmt.Errorf("PDF generation failed: %w", err)
 	}
 
-	// Write to temp file; extension will move/copy via saveAs dialog.
+	// Write to temp file; extension will prompt user for final save location.
 	tmpDir := os.TempDir()
-	// Use a timestamp-based name; extension will prompt user for final location.
-	name := fmt.Sprintf("article-%d.pdf", time.Now().UnixMilli())
+	name := toSafeFileName(pageTitle) + ".pdf"
 	outPath := filepath.Join(tmpDir, name)
 	if err := os.WriteFile(outPath, pdfBuf, 0o644); err != nil {
 		return "", fmt.Errorf("failed to write PDF: %w", err)
@@ -228,6 +230,25 @@ func generatePDF(rawURL string) (string, error) {
 }
 
 // ── Sanitise URL ──────────────────────────────────────────────────────────────
+
+var unsafeChars = regexp.MustCompile(`[^a-zA-Z0-9\-_]+`)
+var multiDash = regexp.MustCompile(`-{2,}`)
+
+func toSafeFileName(s string) string {
+	if s == "" {
+		return "article"
+	}
+	s = unsafeChars.ReplaceAllString(s, "-")
+	s = multiDash.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if len(s) > 80 {
+		s = s[:80]
+	}
+	if s == "" {
+		return "article"
+	}
+	return s
+}
 
 func isAllowedURL(raw string) bool {
 	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")
