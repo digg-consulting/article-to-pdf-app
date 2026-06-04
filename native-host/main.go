@@ -110,7 +110,7 @@ const prepareArticleJS = `(function(){
   }
 
   var candidates = Array.from(document.querySelectorAll(
-    "article,main,[role='main'],.post-content,.article-content,.entry-content,.content"
+    "article,.body.markup,.available-content,main,[role='main'],.post-content,.article-content,.entry-content,.content"
   ));
   if(!candidates.length) candidates = Array.from(document.body.children);
   if(!candidates.length) return;
@@ -189,7 +189,11 @@ func generatePDF(rawURL string) (string, error) {
 	var pdfBuf []byte
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(rawURL),
-		chromedp.WaitReady("body", chromedp.ByQuery),
+		// Wait for network to settle so dynamic content (Substack, Medium, etc.) is fully rendered.
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return chromedp.WaitReady("body", chromedp.ByQuery).Do(ctx)
+		}),
+		chromedp.Sleep(2*time.Second),
 		chromedp.Evaluate(prepareArticleJS, nil),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			buf, _, err := page.PrintToPDF().
