@@ -61,9 +61,10 @@ fi
 
 chmod +x "$BINARY_PATH"
 
-# macOS: remove quarantine attribute so Gatekeeper doesn't block execution
+# macOS: remove quarantine and ad-hoc sign so Gatekeeper/App Management doesn't block execution
 if [[ "$OS" == "darwin" ]]; then
-  xattr -d com.apple.quarantine "$BINARY_PATH" 2>/dev/null || true
+  xattr -cr "$BINARY_PATH" 2>/dev/null || true
+  codesign --force --sign - "$BINARY_PATH" 2>/dev/null || true
 fi
 
 # ── 3. Install extensions ─────────────────────────────────────────────────────
