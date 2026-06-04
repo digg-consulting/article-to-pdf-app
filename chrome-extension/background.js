@@ -9,17 +9,26 @@ function sendToHost(url) {
       } else if (!response?.ok) {
         reject(new Error(response?.error || "Unknown error from native host"));
       } else {
-        resolve(response.path);
+        resolve(response);
       }
     });
   });
 }
 
+function base64ToBlob(base64, type = "application/pdf") {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
 async function downloadArticlePdf(articleUrl) {
-  const pdfPath = await sendToHost(articleUrl);
-  // Convert the local file path to a file:// URL for chrome.downloads
-  const fileUrl = "file://" + pdfPath;
-  await chrome.downloads.download({ url: fileUrl, saveAs: true });
+  const { data, filename } = await sendToHost(articleUrl);
+  const blob = base64ToBlob(data);
+  const objectUrl = URL.createObjectURL(blob);
+  await chrome.downloads.download({ url: objectUrl, filename, saveAs: true });
+  // Revoke after a delay to ensure download starts
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -39,11 +48,10 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
   }
 });
 
-// Handle messages from popup.js
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type !== "download") return false;
   downloadArticlePdf(msg.url)
     .then(() => sendResponse({ ok: true }))
     .catch((e) => sendResponse({ ok: false, error: e.message }));
-  return true; // keep channel open for async response
+  return true;
 });

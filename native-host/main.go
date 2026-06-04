@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -172,10 +172,10 @@ const prepareArticleJS = `(function(){
 
 // ── PDF generation ────────────────────────────────────────────────────────────
 
-func generatePDF(rawURL string, parsed *url.URL) (string, error) {
+func generatePDF(rawURL string, parsed *url.URL) (pdfData string, filename string, err error) {
 	chromePath, err := findChrome()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -224,13 +224,10 @@ func generatePDF(rawURL string, parsed *url.URL) (string, error) {
 		}),
 	)
 	if err != nil {
-		return "", fmt.Errorf("PDF generation failed: %w", err)
+		return "", "", fmt.Errorf("PDF generation failed: %w", err)
 	}
 
-	// Write to temp file; extension will prompt user for final save location.
-	tmpDir := os.TempDir()
-	// Prefer the last URL path segment (e.g. "what-to-do-when-buyers-start-in-llms"),
-	// fall back to the page title if the path has no useful slug.
+	// Derive filename from URL slug, fall back to page title.
 	slug := strings.Trim(parsed.Path, "/")
 	if idx := strings.LastIndex(slug, "/"); idx >= 0 {
 		slug = slug[idx+1:]
@@ -239,11 +236,8 @@ func generatePDF(rawURL string, parsed *url.URL) (string, error) {
 		slug = toSafeFileName(pageTitle)
 	}
 	name := slug + ".pdf"
-	outPath := filepath.Join(tmpDir, name)
-	if err := os.WriteFile(outPath, pdfBuf, 0o644); err != nil {
-		return "", fmt.Errorf("failed to write PDF: %w", err)
-	}
-	return outPath, nil
+
+	return base64.StdEncoding.EncodeToString(pdfBuf), name, nil
 }
 
 // ── Sanitise URL ──────────────────────────────────────────────────────────────
@@ -292,11 +286,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	path, err := generatePDF(rawURL, parsed)
+	pdfData, filename, err := generatePDF(rawURL, parsed)
 	if err != nil {
 		_ = writeMsg(map[string]any{"ok": false, "error": err.Error()})
 		os.Exit(1)
 	}
 
-	_ = writeMsg(map[string]any{"ok": true, "path": path})
+	_ = writeMsg(map[string]any{"ok": true, "data": pdfData, "filename": filename})
 }
