@@ -7,19 +7,14 @@ async function sendToHost(url) {
   return response;
 }
 
-function base64ToBlob(base64, type = "application/pdf") {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type });
-}
-
 async function downloadArticlePdf(articleUrl) {
   const { data, filename } = await sendToHost(articleUrl);
-  const blob = base64ToBlob(data);
-  const objectUrl = URL.createObjectURL(blob);
-  await browser.downloads.download({ url: objectUrl, filename, saveAs: true });
-  URL.revokeObjectURL(objectUrl);
+  const dataUrl = "data:application/pdf;base64," + data;
+  await browser.downloads.download({
+    url: dataUrl,
+    filename: filename || "article.pdf",
+    saveAs: true,
+  });
 }
 
 browser.runtime.onInstalled.addListener(() => {

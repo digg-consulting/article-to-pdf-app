@@ -15,20 +15,15 @@ function sendToHost(url) {
   });
 }
 
-function base64ToBlob(base64, type = "application/pdf") {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type });
-}
-
 async function downloadArticlePdf(articleUrl) {
   const { data, filename } = await sendToHost(articleUrl);
-  const blob = base64ToBlob(data);
-  const objectUrl = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url: objectUrl, filename, saveAs: true });
-  // Revoke after a delay to ensure download starts
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+  // Use a data URL — Chrome handles these reliably with downloads API
+  const dataUrl = "data:application/pdf;base64," + data;
+  await chrome.downloads.download({
+    url: dataUrl,
+    filename: filename || "article.pdf",
+    saveAs: true,
+  });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
