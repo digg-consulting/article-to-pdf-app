@@ -72,3 +72,4 @@ cd article-to-pdf-app
 
 - Some sites block automated rendering
 - The binary uses your system Chrome — no separate browser download
+- **macOS:** if you downloaded the binary manually (not via `install.sh`), you may need to run `xattr -d com.apple.quarantine ~/.local/bin/article-to-pdf-host` to allow execution
