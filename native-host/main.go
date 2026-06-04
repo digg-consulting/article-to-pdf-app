@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -164,7 +165,7 @@ const prepareArticleJS = `(function(){
 
 // ── PDF generation ────────────────────────────────────────────────────────────
 
-func generatePDF(rawURL string) (string, error) {
+func generatePDF(rawURL string, parsed *url.URL) (string, error) {
 	chromePath, err := findChrome()
 	if err != nil {
 		return "", err
@@ -221,7 +222,16 @@ func generatePDF(rawURL string) (string, error) {
 
 	// Write to temp file; extension will prompt user for final save location.
 	tmpDir := os.TempDir()
-	name := toSafeFileName(pageTitle) + ".pdf"
+	// Prefer the last URL path segment (e.g. "what-to-do-when-buyers-start-in-llms"),
+	// fall back to the page title if the path has no useful slug.
+	slug := strings.Trim(parsed.Path, "/")
+	if idx := strings.LastIndex(slug, "/"); idx >= 0 {
+		slug = slug[idx+1:]
+	}
+	if slug == "" {
+		slug = toSafeFileName(pageTitle)
+	}
+	name := slug + ".pdf"
 	outPath := filepath.Join(tmpDir, name)
 	if err := os.WriteFile(outPath, pdfBuf, 0o644); err != nil {
 		return "", fmt.Errorf("failed to write PDF: %w", err)
@@ -269,7 +279,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	path, err := generatePDF(rawURL)
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		_ = writeMsg(map[string]any{"ok": false, "error": "invalid URL"})
+		os.Exit(1)
+	}
+
+	path, err := generatePDF(rawURL, parsed)
 	if err != nil {
 		_ = writeMsg(map[string]any{"ok": false, "error": err.Error()})
 		os.Exit(1)
