@@ -18,19 +18,42 @@ export const WAIT_FOR_CONTENT_JS = `(async function(){
 
 export const SCROLL_FOR_IMAGES_JS = `(async function(){
   const delay = ms => new Promise(r => setTimeout(r, ms));
+  const waitImg = (img) => new Promise(function(resolve){
+    if(img.complete && img.naturalWidth > 0) return resolve();
+    img.addEventListener("load", resolve, { once: true });
+    img.addEventListener("error", resolve, { once: true });
+    setTimeout(resolve, 8000);
+  });
+
+  function hydrateImages(root){
+    root.querySelectorAll("img").forEach(function(img){
+      img.loading = "eager";
+      img.removeAttribute("loading");
+      var ds = img.getAttribute("data-src") || img.getAttribute("data-lazy-src") || img.getAttribute("data-original");
+      if(ds && (!img.src || img.src.indexOf("data:") === 0)) img.src = ds;
+      if(!img.getAttribute("src") && img.currentSrc) img.setAttribute("src", img.currentSrc);
+    });
+  }
+
   let stable = 0;
   let lastHeight = 0;
-  for (let pass = 0; pass < 15 && stable < 3; pass++) {
+  for (let pass = 0; pass < 20 && stable < 3; pass++) {
+    hydrateImages(document);
     const h = document.body.scrollHeight;
     if (h === lastHeight) stable++;
     else { stable = 0; lastHeight = h; }
-    for (let y = 0; y < h; y += 800) {
+    for (let y = 0; y < h; y += 600) {
       window.scrollTo(0, y);
-      await delay(80);
+      await delay(120);
+      hydrateImages(document);
     }
     window.scrollTo(0, 0);
-    await delay(300);
+    await delay(400);
   }
+
+  hydrateImages(document);
+  await Promise.all(Array.from(document.querySelectorAll("img")).map(waitImg));
+  await delay(500);
 })()`;
 
 export const PREPARE_ARTICLE_JS = `(function(){
@@ -51,42 +74,105 @@ export const PREPARE_ARTICLE_JS = `(function(){
     return raw.trim();
   }
 
-  // Capture metadata before any DOM changes (Substack, Medium, WordPress, etc.)
-  var pubEl = document.querySelector(
-    "a.publ-name, .publication-name, .pub-name, [class*='publication'] a, .navbar-title-link, header .pencraft a[href*='substack']"
-  );
-  var titleEl = document.querySelector(
-    "h1.post-title, h1[class*='post-title'], .post-header h1, article h1, main h1, h1.title"
-  );
-  var subtitleEl = document.querySelector(
-    ".subtitle, h3.subtitle, [class*='subtitle'], .post-subtitle, .deck"
-  );
-  var authorEl = document.querySelector(
-    ".post-contributors a, .byline a, a[href*='/@'], .profile-hover-card-target, [rel='author'], .author-name a, a[href*='/profile/']"
-  );
-  var dateEl = document.querySelector(
-    "time[datetime], .post-date time, [class*='post-date'] time, .byline time, time"
-  );
-
-  var meta = {
-    publication: pubEl ? pubEl.innerText.trim() : "",
-    publicationUrl: pubEl && pubEl.href ? pubEl.href : "",
-    title: titleEl ? titleEl.innerText.trim() : "",
-    subtitle: subtitleEl ? subtitleEl.innerText.trim() : "",
-    author: authorEl ? authorEl.innerText.trim() : "",
-    authorUrl: authorEl && authorEl.href ? authorEl.href : "",
-    date: dateEl ? formatDate(dateEl.getAttribute("datetime") || dateEl.innerText) : ""
-  };
-
-  if(!meta.title) {
-    var og = document.querySelector("meta[property='og:title']");
-    if(og && og.content) meta.title = og.content.trim();
-  }
-  if(!meta.author) {
-    var authorMeta = document.querySelector("meta[name='author']");
-    if(authorMeta && authorMeta.content) meta.author = authorMeta.content.trim();
+  function metaContent(prop){
+    var el = document.querySelector('meta[property="'+prop+'"], meta[name="'+prop+'"]');
+    return el && el.content ? el.content.trim() : "";
   }
 
+  function extractMeta(){
+    var titleEl = document.querySelector(
+      "h1.post-title, h1[class*='post-title'], .post-header h1, article h1, main h1, h1.title"
+    );
+    var scope = titleEl ? (titleEl.closest("article, main, [class*='post']") || document) : document;
+
+    var meta = {
+      publication: "",
+      publicationUrl: "",
+      title: titleEl ? titleEl.innerText.trim() : "",
+      subtitle: "",
+      author: "",
+      authorUrl: "",
+      date: ""
+    };
+
+    var pubEl = document.querySelector(
+      "a.publ-name, .pub-name, .publication-name, .navbar-title-link, " +
+      "header a[href*='substack.com'], .pencraft a[href*='.substack.com']"
+    );
+    if(pubEl) {
+      meta.publication = pubEl.innerText.trim();
+      meta.publicationUrl = pubEl.href || "";
+    } else {
+      meta.publication = metaContent("og:site_name");
+      var canonical = document.querySelector("link[rel='canonical']");
+      meta.publicationUrl = canonical && canonical.href ? new URL(canonical.href).origin : (metaContent("og:url") ? new URL(metaContent("og:url")).origin : "");
+    }
+
+    if(!meta.title) meta.title = metaContent("og:title");
+
+    if(titleEl) {
+      var sib = titleEl.nextElementSibling;
+      for(var i = 0; i < 6 && sib; i++, sib = sib.nextElementSibling) {
+        var txt = (sib.innerText || "").trim();
+        if(!txt || txt.length > 300) continue;
+        if(sib.querySelector("time") || sib.querySelector("a[href*='/@']")) continue;
+        if(/subtitle|deck/i.test(sib.className || "") || sib.tagName === "H3" || sib.tagName === "H2") {
+          meta.subtitle = txt;
+          break;
+        }
+        if(!meta.subtitle && sib.tagName === "P") {
+          meta.subtitle = txt;
+          break;
+        }
+      }
+    }
+    if(!meta.subtitle) {
+      var subEl = scope.querySelector(".subtitle, h3.subtitle, [class*='subtitle'], .post-subtitle, .deck");
+      if(subEl) meta.subtitle = subEl.innerText.trim();
+    }
+
+    var authorEl = scope.querySelector(
+      "a[href*='/@'], a[href*='/profile'], [rel='author'], .byline a, .post-contributors a, .profile-hover-card-target"
+    );
+    if(authorEl) {
+      meta.author = authorEl.innerText.trim();
+      meta.authorUrl = authorEl.href || "";
+    }
+    if(!meta.author) meta.author = metaContent("author");
+
+    var dateEl = scope.querySelector("time[datetime], .byline time, [class*='post-date'] time");
+    if(dateEl) {
+      meta.date = formatDate(dateEl.getAttribute("datetime") || dateEl.innerText);
+    } else {
+      var published = metaContent("article:published_time") || metaContent("published_time");
+      if(published) meta.date = formatDate(published);
+    }
+
+    try {
+      document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s){
+        var data = JSON.parse(s.textContent);
+        var items = data["@graph"] || [data];
+        items.forEach(function(d){
+          if(!d || (d["@type"] !== "NewsArticle" && d["@type"] !== "BlogPosting" && d["@type"] !== "Article")) return;
+          if(!meta.title && d.headline) meta.title = d.headline;
+          if(!meta.subtitle && d.description && d.description.length < 300) meta.subtitle = d.description;
+          if(!meta.author && d.author) {
+            meta.author = typeof d.author === "string" ? d.author : (d.author.name || "");
+            if(d.author.url) meta.authorUrl = d.author.url;
+          }
+          if(!meta.date && d.datePublished) meta.date = formatDate(d.datePublished);
+          if(!meta.publication && d.publisher && d.publisher.name) {
+            meta.publication = d.publisher.name;
+            if(d.publisher.url) meta.publicationUrl = d.publisher.url;
+          }
+        });
+      });
+    } catch(e){}
+
+    return meta;
+  }
+
+  var meta = extractMeta();
   window.__articlePdfMeta = meta;
 
   document.querySelectorAll("iframe").forEach(function(iframe){
@@ -115,6 +201,18 @@ export const PREPARE_ARTICLE_JS = `(function(){
 
   var clone = best.cloneNode(true);
 
+  // Remove title-block duplicates from body — header carries attribution.
+  if(meta.title) {
+    clone.querySelectorAll("h1").forEach(function(h){
+      if(h.innerText.trim() === meta.title) h.remove();
+    });
+  }
+  if(meta.subtitle) {
+    clone.querySelectorAll("h2,h3,p").forEach(function(el){
+      if(el.innerText.trim() === meta.subtitle) el.remove();
+    });
+  }
+
   ["script","style","noscript","nav","header","footer","aside",
    "form","button","input","select","textarea","[aria-hidden='true']",
    "[id*='cookie' i]","[class*='cookie' i]","[id*='consent' i]","[class*='consent' i]",
@@ -136,6 +234,8 @@ export const PREPARE_ARTICLE_JS = `(function(){
     });
   }
   clone.querySelectorAll("img").forEach(function(img){
+    var ds = img.getAttribute("data-src") || img.getAttribute("data-lazy-src") || img.getAttribute("data-original");
+    if(ds && (!img.getAttribute("src") || img.getAttribute("src").indexOf("data:") === 0)) img.setAttribute("src", ds);
     if(!img.getAttribute("src") && img.currentSrc) img.setAttribute("src", img.currentSrc);
   });
 
@@ -154,7 +254,7 @@ export const PREPARE_ARTICLE_JS = `(function(){
 
   if(meta.publication) {
     var pub = document.createElement("p");
-    pub.style.cssText = "font-size:13px;color:#666;margin:0 0 .6em;letter-spacing:.02em;";
+    pub.style.cssText = "font-size:13px;color:#666;margin:0 0 .6em;letter-spacing:.02em;font-weight:600;";
     if(meta.publicationUrl) {
       pub.innerHTML = '<a href="' + meta.publicationUrl + '">' + meta.publication + '</a>';
     } else {
@@ -163,14 +263,14 @@ export const PREPARE_ARTICLE_JS = `(function(){
     header.appendChild(pub);
   }
 
-  if(meta.title && clone.innerText.indexOf(meta.title) === -1) {
+  if(meta.title) {
     var h1 = document.createElement("h1");
     h1.textContent = meta.title;
     h1.style.cssText = "margin:0 0 .35em;line-height:1.2;font-size:1.65em;font-weight:700;";
     header.appendChild(h1);
   }
 
-  if(meta.subtitle && clone.innerText.indexOf(meta.subtitle) === -1) {
+  if(meta.subtitle) {
     var sub = document.createElement("p");
     sub.textContent = meta.subtitle;
     sub.style.cssText = "font-size:1.05em;color:#444;margin:0 0 .75em;line-height:1.4;";
@@ -205,7 +305,8 @@ export const PREPARE_ARTICLE_JS = `(function(){
     "main{background:#fff!important;padding-bottom:0!important}",
     "main,article,section,div{width:auto!important;max-width:none!important}",
     "p,li,blockquote{max-width:none!important}",
-    "img,video{max-width:100%!important;height:auto!important}",
+    "img,video,svg{max-width:100%!important;height:auto!important;display:block!important}",
+    "img{page-break-inside:avoid!important;object-fit:contain!important}",
     "pre,code{white-space:pre-wrap!important;word-break:break-word!important;background:#f5f5f5!important}",
     "p{margin:0 0 .8em}",
     "h1,h2,h3,h4{margin:1em 0 .4em;line-height:1.25}",

@@ -104,6 +104,16 @@ export async function generatePdf(rawUrl, cookies) {
 
     await runInPage(page, WAIT_FOR_CONTENT_JS);
     await runInPage(page, SCROLL_FOR_IMAGES_JS);
+    await page
+      .waitForFunction(
+        () => {
+          const imgs = [...document.querySelectorAll("img")];
+          if (!imgs.length) return true;
+          return imgs.every((img) => img.complete && img.naturalWidth > 0);
+        },
+        { timeout: 20_000 }
+      )
+      .catch(() => {});
     await runInPage(page, PREPARE_ARTICLE_JS);
 
     const meta = await page.evaluate(() => window.__articlePdfMeta || null);
