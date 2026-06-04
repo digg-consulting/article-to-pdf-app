@@ -1,0 +1,5 @@
+# Go build output
+native-host/article-to-pdf-host
+
+# macOS
+.DS_Store

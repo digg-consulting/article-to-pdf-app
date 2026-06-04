@@ -1,0 +1,9 @@
+{
+  "name": "article-to-pdf-app",
+  "version": "2.0.0",
+  "description": "Browser extension + Go native messaging host that saves articles as clean PDFs. No server required.",
+  "scripts": {
+    "build": "cd native-host && go build -o article-to-pdf-host .",
+    "install-host": "bash install.sh"
+  }
+}
