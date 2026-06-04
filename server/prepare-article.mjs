@@ -40,10 +40,54 @@ export const PREPARE_ARTICLE_JS = `(function(){
       el.querySelectorAll("img").length*150;
   }
 
-  var titleEl = document.querySelector("h1.post-title, article h1, h1[class*='post-title']");
-  var subtitleEl = document.querySelector(".subtitle, h3.subtitle, [class*='subtitle']");
-  var titleText = titleEl ? titleEl.innerText.trim() : "";
-  var subtitleText = subtitleEl ? subtitleEl.innerText.trim() : "";
+  function formatDate(raw){
+    if(!raw) return "";
+    try {
+      var d = new Date(raw);
+      if(!isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"});
+      }
+    } catch(e) {}
+    return raw.trim();
+  }
+
+  // Capture metadata before any DOM changes (Substack, Medium, WordPress, etc.)
+  var pubEl = document.querySelector(
+    "a.publ-name, .publication-name, .pub-name, [class*='publication'] a, .navbar-title-link, header .pencraft a[href*='substack']"
+  );
+  var titleEl = document.querySelector(
+    "h1.post-title, h1[class*='post-title'], .post-header h1, article h1, main h1, h1.title"
+  );
+  var subtitleEl = document.querySelector(
+    ".subtitle, h3.subtitle, [class*='subtitle'], .post-subtitle, .deck"
+  );
+  var authorEl = document.querySelector(
+    ".post-contributors a, .byline a, a[href*='/@'], .profile-hover-card-target, [rel='author'], .author-name a, a[href*='/profile/']"
+  );
+  var dateEl = document.querySelector(
+    "time[datetime], .post-date time, [class*='post-date'] time, .byline time, time"
+  );
+
+  var meta = {
+    publication: pubEl ? pubEl.innerText.trim() : "",
+    publicationUrl: pubEl && pubEl.href ? pubEl.href : "",
+    title: titleEl ? titleEl.innerText.trim() : "",
+    subtitle: subtitleEl ? subtitleEl.innerText.trim() : "",
+    author: authorEl ? authorEl.innerText.trim() : "",
+    authorUrl: authorEl && authorEl.href ? authorEl.href : "",
+    date: dateEl ? formatDate(dateEl.getAttribute("datetime") || dateEl.innerText) : ""
+  };
+
+  if(!meta.title) {
+    var og = document.querySelector("meta[property='og:title']");
+    if(og && og.content) meta.title = og.content.trim();
+  }
+  if(!meta.author) {
+    var authorMeta = document.querySelector("meta[name='author']");
+    if(authorMeta && authorMeta.content) meta.author = authorMeta.content.trim();
+  }
+
+  window.__articlePdfMeta = meta;
 
   document.querySelectorAll("iframe").forEach(function(iframe){
     var src = iframe.src || iframe.getAttribute("data-src") || "";
@@ -104,18 +148,52 @@ export const PREPARE_ARTICLE_JS = `(function(){
     color:"#111",background:"#fff"
   });
 
-  if(titleText && clone.innerText.indexOf(titleText) === -1) {
+  // Attribution header: publication, title, subtitle, author (linked), date
+  var header = document.createElement("header");
+  header.style.cssText = "margin:0 0 1.5em;padding-bottom:1em;border-bottom:1px solid #ddd;";
+
+  if(meta.publication) {
+    var pub = document.createElement("p");
+    pub.style.cssText = "font-size:13px;color:#666;margin:0 0 .6em;letter-spacing:.02em;";
+    if(meta.publicationUrl) {
+      pub.innerHTML = '<a href="' + meta.publicationUrl + '">' + meta.publication + '</a>';
+    } else {
+      pub.textContent = meta.publication;
+    }
+    header.appendChild(pub);
+  }
+
+  if(meta.title && clone.innerText.indexOf(meta.title) === -1) {
     var h1 = document.createElement("h1");
-    h1.textContent = titleText;
-    h1.style.cssText = "margin:0 0 .3em;line-height:1.2;";
-    container.appendChild(h1);
+    h1.textContent = meta.title;
+    h1.style.cssText = "margin:0 0 .35em;line-height:1.2;font-size:1.65em;font-weight:700;";
+    header.appendChild(h1);
   }
-  if(subtitleText) {
+
+  if(meta.subtitle && clone.innerText.indexOf(meta.subtitle) === -1) {
     var sub = document.createElement("p");
-    sub.textContent = subtitleText;
-    sub.style.cssText = "font-size:1.15em;color:#555;margin:0 0 1.5em;";
-    container.appendChild(sub);
+    sub.textContent = meta.subtitle;
+    sub.style.cssText = "font-size:1.05em;color:#444;margin:0 0 .75em;line-height:1.4;";
+    header.appendChild(sub);
   }
+
+  if(meta.author || meta.date) {
+    var byline = document.createElement("p");
+    byline.style.cssText = "font-size:13px;color:#555;margin:0;";
+    var parts = [];
+    if(meta.author) {
+      if(meta.authorUrl) {
+        parts.push('<a href="' + meta.authorUrl + '">' + meta.author + '</a>');
+      } else {
+        parts.push(meta.author);
+      }
+    }
+    if(meta.date) parts.push(meta.date);
+    byline.innerHTML = parts.join(" · ");
+    header.appendChild(byline);
+  }
+
+  if(header.childNodes.length) container.appendChild(header);
 
   container.appendChild(clone);
   document.body.appendChild(container);
@@ -131,6 +209,8 @@ export const PREPARE_ARTICLE_JS = `(function(){
     "pre,code{white-space:pre-wrap!important;word-break:break-word!important;background:#f5f5f5!important}",
     "p{margin:0 0 .8em}",
     "h1,h2,h3,h4{margin:1em 0 .4em;line-height:1.25}",
+    "header a{color:#0f4c81!important;text-decoration:none}",
+    "header p{margin:0 0 .4em}",
     "a{color:#0f4c81!important;text-decoration:none}",
     "main>*:last-child{margin-bottom:0!important;padding-bottom:0!important}"
   ].join("");

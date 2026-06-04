@@ -32,29 +32,49 @@ export function toPlaywrightCookies(cookies, pageUrl) {
   });
 }
 
-export function filenameFromUrl(rawUrl, pageTitle = "") {
+export function sanitizeFilename(name) {
+  if (!name) return "article";
+  const s = name
+    .replace(/[^a-zA-Z0-9\-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+  return s || "article";
+}
+
+function slugFromUrl(rawUrl) {
   try {
     const parsed = new URL(rawUrl);
     let slug = parsed.pathname.replace(/^\/+|\/+$/g, "");
     const idx = slug.lastIndexOf("/");
     if (idx >= 0) slug = slug.slice(idx + 1);
-    if (!slug && pageTitle) {
-      slug = pageTitle
-        .replace(/[^a-zA-Z0-9\-_]+/g, "-")
-        .replace(/-+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 80);
-    }
-    if (!slug) return "article.pdf";
-    slug = slug
-      .replace(/[^a-zA-Z0-9\-_]+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 80);
-    return (slug || "article") + ".pdf";
+    return slug;
   } catch {
-    return "article.pdf";
+    return "";
   }
+}
+
+function titleFromDocumentTitle(documentTitle) {
+  if (!documentTitle) return "";
+  // "Article Title - by Author | Publication" or "Title · Publication"
+  return documentTitle.split(/\s[-|·]\s/)[0].trim();
+}
+
+/** Prefer extracted article title over opaque URL slugs like p-200261831. */
+export function filenameFromMeta(meta, rawUrl, documentTitle = "") {
+  const slug = slugFromUrl(rawUrl);
+  const genericSlug = !slug || /^p-\d+$/i.test(slug) || /^post-\d+$/i.test(slug);
+  const docTitle = titleFromDocumentTitle(documentTitle);
+  const articleTitle = meta?.title?.trim() || "";
+
+  const name =
+    articleTitle ||
+    docTitle ||
+    (!genericSlug ? slug : "") ||
+    slug ||
+    "article";
+
+  return sanitizeFilename(name) + ".pdf";
 }
 
 /** Run a script string inside the page (Playwright-safe vs raw evaluate). */
@@ -86,7 +106,10 @@ export async function generatePdf(rawUrl, cookies) {
     await runInPage(page, SCROLL_FOR_IMAGES_JS);
     await runInPage(page, PREPARE_ARTICLE_JS);
 
-    const title = await page.title();
+    const meta = await page.evaluate(() => window.__articlePdfMeta || null);
+    const documentTitle = await page.title();
+    const filename = filenameFromMeta(meta, rawUrl, documentTitle);
+
     const pdfBuf = await page.pdf({
       format: "A4",
       printBackground: true,
@@ -98,7 +121,7 @@ export async function generatePdf(rawUrl, cookies) {
       },
     });
 
-    return { pdfBuf: Buffer.from(pdfBuf), filename: filenameFromUrl(rawUrl, title) };
+    return { pdfBuf: Buffer.from(pdfBuf), filename };
   } finally {
     await browser.close();
   }
