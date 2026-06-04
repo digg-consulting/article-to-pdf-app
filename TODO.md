@@ -19,7 +19,6 @@
 
 - [ ] **`go vet` / `staticcheck` on PR** — add a second workflow that runs on pull requests (not just tags).
 - [ ] **Checksum file** — publish a `checksums.txt` (SHA-256) alongside the release binaries so `install.sh` can verify integrity before executing.
-
 ## Testing
 
 - [ ] **Go integration test** — start a local HTTP server serving a fixture HTML page, run the full `generatePDF` pipeline, assert the output starts with `%PDF-`.

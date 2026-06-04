@@ -84,7 +84,9 @@ Injected as a JS string via CDP `Runtime.evaluate`:
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
 - Cross-compiles `article-to-pdf-host` for: `darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`
-- Creates a GitHub Release with the binaries and `install.sh` as assets
+- Creates a GitHub Release with the binaries, `install.sh`, and `uninstall.sh` as assets
+
+All third-party actions are pinned to immutable commit SHAs (not tags) to prevent supply-chain attacks.
 
 ### Install flow (end user)
 
