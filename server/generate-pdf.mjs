@@ -67,14 +67,20 @@ async function runInPage(page, script) {
 export async function generatePdf(rawUrl, cookies) {
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const pwCookies = toPlaywrightCookies(cookies, rawUrl);
     if (pwCookies.length) await context.addCookies(pwCookies);
 
     const page = await context.newPage();
-    await page.goto(rawUrl, { waitUntil: "networkidle", timeout: 60_000 });
+    // Substack/Medium keep long-polling open — networkidle never fires.
+    await page.goto(rawUrl, { waitUntil: "load", timeout: 60_000 });
     await page.waitForSelector("body", { timeout: 15_000 });
-    await page.waitForTimeout(2_000);
+    await page
+      .waitForSelector(
+        ".body.markup,.available-content,.post-content,article,[data-testid='post-body']",
+        { timeout: 15_000 }
+      )
+      .catch(() => {});
 
     await runInPage(page, WAIT_FOR_CONTENT_JS);
     await runInPage(page, SCROLL_FOR_IMAGES_JS);
