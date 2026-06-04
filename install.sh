@@ -119,7 +119,11 @@ fi
 
 # ── Install Playwright dependencies ───────────────────────────────────────────
 
+NODE_BIN="$(command -v node)"
 chmod +x "$SERVER_DIR/run-host.sh"
+# Chrome spawns the host with a minimal PATH — embed absolute node path.
+sed -i '' "s|__INSTALL_NODE_PATH__|$NODE_BIN|g" "$SERVER_DIR/run-host.sh" 2>/dev/null \
+  || sed -i "s|__INSTALL_NODE_PATH__|$NODE_BIN|g" "$SERVER_DIR/run-host.sh"
 
 export PLAYWRIGHT_BROWSERS_PATH
 mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
