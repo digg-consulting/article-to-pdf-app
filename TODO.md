@@ -4,6 +4,7 @@
 
 ## Native Host
 
+- [ ] **macOS code signing** — unsigned binaries trigger App Management / Gatekeeper prompts. Sign with an Apple Developer certificate to eliminate this friction.
 - [ ] **Lazy-image scroll before print** — port the scroll-and-wait-for-images logic from the original server: scroll the page to trigger lazy-loaded images, wait for `img.complete && naturalWidth > 0`, then print.
 - [ ] **Configurable PDF options** — format, margins, and scale are hardcoded to A4 / 0.5 in / 1.0. Accept optional fields in the incoming JSON message so the extension can expose a settings panel.
 - [ ] **Navigation timeout config** — 60 s is hardcoded. Read from `~/.config/article-to-pdf/config.json` or an env var.
