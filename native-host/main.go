@@ -112,12 +112,19 @@ const prepareArticleJS = `(function(){
   }
 
   var candidates = Array.from(document.querySelectorAll(
-    "article,.body.markup,.available-content,main,[role='main'],.post-content,.article-content,.entry-content,.content"
+    ".body.markup,.available-content,.post-content,.article-content,.entry-content,article,main,[role='main'],.content"
   ));
   if(!candidates.length) candidates = Array.from(document.body.children);
   if(!candidates.length) return;
 
-  var best = candidates.reduce(function(a,b){return score(b)>score(a)?b:a;}, candidates[0]);
+  // Prefer the most specific (smallest) container that still has substantial content.
+  // Filter out containers that wrap other candidates (parent > child).
+  var filtered = candidates.filter(function(el){
+    return !candidates.some(function(other){ return other !== el && el.contains(other) && score(other) > 500; });
+  });
+  if(!filtered.length) filtered = candidates;
+
+  var best = filtered.reduce(function(a,b){return score(b)>score(a)?b:a;}, filtered[0]);
   var clone = best.cloneNode(true);
 
   ["script","style","noscript","nav","header","footer","aside",

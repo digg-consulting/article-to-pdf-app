@@ -61,6 +61,11 @@ fi
 
 chmod +x "$BINARY_PATH"
 
+# macOS: remove quarantine attribute so Gatekeeper doesn't block execution
+if [[ "$OS" == "darwin" ]]; then
+  xattr -d com.apple.quarantine "$BINARY_PATH" 2>/dev/null || true
+fi
+
 # ── 3. Install extensions ─────────────────────────────────────────────────────
 
 mkdir -p "$EXTENSIONS_DIR"
