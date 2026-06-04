@@ -1,35 +1,34 @@
 #!/usr/bin/env bash
-# install.sh — installs the article-to-pdf native messaging host and extensions
+# install.sh — installs the Playwright native host and Chrome extension
 #
-# Usage (one-liner):
-#   curl -fsSL https://github.com/digg-consulting/article-to-pdf-app/releases/latest/download/install.sh | bash
-#
-# Or after cloning:
+# Usage (from a git clone):
 #   ./install.sh
+#
+# Dev mode — register host from repo paths (no copy to ~/.local/share):
+#   ./install.sh --dev
+#
+# Usage (from a GitHub Release download — install.sh + zips in same folder):
+#   ./install.sh
+#
+# Or download latest release assets automatically:
+#   curl -fsSL https://github.com/digg-consulting/article-to-pdf-app/releases/latest/download/install.sh | bash
 set -euo pipefail
 
 REPO="digg-consulting/article-to-pdf-app"
 HOST_NAME="com.digg.articlepdf"
-BINARY_NAME="article-to-pdf-host"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-EXTENSIONS_DIR="${EXTENSIONS_DIR:-$HOME/.local/share/article-to-pdf}"
 CHROME_EXT_ID="jfcifebaiplehpcoijaggkhmejmjaafp"
-FIREFOX_EXT_ID="article-to-pdf@local"
+EXTENSIONS_DIR="${EXTENSIONS_DIR:-$HOME/.local/share/article-to-pdf}"
+PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$EXTENSIONS_DIR/playwright-browsers}"
+DEV_MODE=false
 
-# ── 1. Detect OS / arch ───────────────────────────────────────────────────────
+if [[ "${1:-}" == "--dev" ]]; then
+  DEV_MODE=true
+fi
 
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64)  ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
-  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
-esac
-
-case "$OS" in
-  darwin|linux) ;;
-  *) echo "Unsupported OS: $OS. Use install.ps1 on Windows."; exit 1 ;;
-esac
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
+if [[ -z "$SCRIPT_DIR" || "$SCRIPT_DIR" == "/dev/fd" ]]; then
+  SCRIPT_DIR="$(pwd)"
+fi
 
 download() {
   local url="$1" dest="$2"
@@ -38,107 +37,157 @@ download() {
   elif command -v wget &>/dev/null; then
     wget -qO "$dest" "$url"
   else
-    echo "Error: curl or wget is required."; exit 1
+    echo "Error: curl or wget is required." >&2
+    exit 1
   fi
 }
 
 BASE_URL="https://github.com/${REPO}/releases/latest/download"
 
-# ── 2. Install binary ─────────────────────────────────────────────────────────
+# ── Prerequisites ─────────────────────────────────────────────────────────────
 
-mkdir -p "$INSTALL_DIR"
-BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/stdin}")" 2>/dev/null && pwd || echo "")"
-LOCAL_BINARY="$SCRIPT_DIR/native-host/$BINARY_NAME"
-
-if [[ -f "$LOCAL_BINARY" ]]; then
-  cp "$LOCAL_BINARY" "$BINARY_PATH"
-else
-  echo "Downloading ${BINARY_NAME}-${OS}-${ARCH}..."
-  download "${BASE_URL}/${BINARY_NAME}-${OS}-${ARCH}" "$BINARY_PATH"
+if ! command -v node &>/dev/null; then
+  echo "Error: Node.js 18+ is required." >&2
+  echo "Install from https://nodejs.org or: brew install node" >&2
+  exit 1
 fi
 
-chmod +x "$BINARY_PATH"
-
-# macOS: remove quarantine and ad-hoc sign so Gatekeeper/App Management doesn't block execution
-if [[ "$OS" == "darwin" ]]; then
-  xattr -cr "$BINARY_PATH" 2>/dev/null || true
-  codesign --force --sign - "$BINARY_PATH" 2>/dev/null || true
+NODE_MAJOR="$(node -p "process.versions.node.split('.')[0]")"
+if [[ "$NODE_MAJOR" -lt 18 ]]; then
+  echo "Error: Node.js 18+ required (found $(node -v))." >&2
+  exit 1
 fi
 
-# ── 3. Install extensions ─────────────────────────────────────────────────────
+# ── Locate or fetch source files ──────────────────────────────────────────────
 
-mkdir -p "$EXTENSIONS_DIR"
+STAGING_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
 
-CHROME_EXT_DIR="$EXTENSIONS_DIR/chrome-extension"
-FIREFOX_EXT_DIR="$EXTENSIONS_DIR/firefox-extension"
-
-if [[ -d "$SCRIPT_DIR/chrome-extension" ]]; then
+if [[ "$DEV_MODE" == true ]]; then
+  if [[ ! -d "$SCRIPT_DIR/server" || ! -d "$SCRIPT_DIR/chrome-extension" ]]; then
+    echo "Error: --dev requires server/ and chrome-extension/ in the repo." >&2
+    exit 1
+  fi
+  SERVER_DIR="$SCRIPT_DIR/server"
+  CHROME_EXT_DIR="$SCRIPT_DIR/chrome-extension"
+  echo "Dev mode: using repo paths (not copying to $EXTENSIONS_DIR)"
+elif [[ -d "$SCRIPT_DIR/server" && -d "$SCRIPT_DIR/chrome-extension" ]]; then
+  mkdir -p "$EXTENSIONS_DIR"
+  SERVER_DIR="$EXTENSIONS_DIR/server"
+  CHROME_EXT_DIR="$EXTENSIONS_DIR/chrome-extension"
+  rm -rf "$SERVER_DIR" "$CHROME_EXT_DIR"
+  cp -r "$SCRIPT_DIR/server" "$SERVER_DIR"
   cp -r "$SCRIPT_DIR/chrome-extension" "$CHROME_EXT_DIR"
-  cp -r "$SCRIPT_DIR/firefox-extension" "$FIREFOX_EXT_DIR"
+  echo "Installed to $EXTENSIONS_DIR"
+elif [[ -f "$SCRIPT_DIR/server.zip" && -f "$SCRIPT_DIR/chrome-extension.zip" ]]; then
+  mkdir -p "$EXTENSIONS_DIR"
+  unzip -q "$SCRIPT_DIR/server.zip" -d "$STAGING_DIR"
+  unzip -q "$SCRIPT_DIR/chrome-extension.zip" -d "$STAGING_DIR"
+  SERVER_SRC="$(dirname "$(find "$STAGING_DIR" -path '*/server/host.mjs' | head -1)")"
+  CHROME_SRC="$(dirname "$(find "$STAGING_DIR" -path '*/chrome-extension/manifest.json' | head -1)")"
+  if [[ -z "$SERVER_SRC" || -z "$CHROME_SRC" ]]; then
+    # zips may extract flat
+    SERVER_SRC="$(dirname "$(find "$STAGING_DIR" -name host.mjs | head -1)")"
+    CHROME_SRC="$(dirname "$(find "$STAGING_DIR" -name manifest.json | head -1)")"
+  fi
+  SERVER_DIR="$EXTENSIONS_DIR/server"
+  CHROME_EXT_DIR="$EXTENSIONS_DIR/chrome-extension"
+  rm -rf "$SERVER_DIR" "$CHROME_EXT_DIR"
+  cp -r "$SERVER_SRC" "$SERVER_DIR"
+  cp -r "$CHROME_SRC" "$CHROME_EXT_DIR"
+  echo "Installed from release zips to $EXTENSIONS_DIR"
 else
-  echo "Downloading extensions..."
-  TMP_DIR="$(mktemp -d)"
-  download "${BASE_URL}/chrome-extension.zip"  "$TMP_DIR/chrome-extension.zip"
-  download "${BASE_URL}/firefox-extension.zip" "$TMP_DIR/firefox-extension.zip"
-  unzip -q "$TMP_DIR/chrome-extension.zip"  -d "$TMP_DIR/chrome"
-  unzip -q "$TMP_DIR/firefox-extension.zip" -d "$TMP_DIR/firefox"
-  # unzip may produce a subdirectory; find the one with manifest.json
-  CHROME_SRC="$(dirname "$(find "$TMP_DIR/chrome"  -name manifest.json | head -1)")"
-  FIREFOX_SRC="$(dirname "$(find "$TMP_DIR/firefox" -name manifest.json | head -1)")"
-  rm -rf "$CHROME_EXT_DIR" "$FIREFOX_EXT_DIR"
-  cp -r "$CHROME_SRC"  "$CHROME_EXT_DIR"
-  cp -r "$FIREFOX_SRC" "$FIREFOX_EXT_DIR"
-  rm -rf "$TMP_DIR"
+  echo "Downloading latest release..."
+  mkdir -p "$EXTENSIONS_DIR"
+  download "${BASE_URL}/server.zip" "$STAGING_DIR/server.zip"
+  download "${BASE_URL}/chrome-extension.zip" "$STAGING_DIR/chrome-extension.zip"
+  unzip -q "$STAGING_DIR/server.zip" -d "$STAGING_DIR/server-unpack"
+  unzip -q "$STAGING_DIR/chrome-extension.zip" -d "$STAGING_DIR/chrome-unpack"
+  SERVER_SRC="$(dirname "$(find "$STAGING_DIR/server-unpack" -name host.mjs | head -1)")"
+  CHROME_SRC="$(dirname "$(find "$STAGING_DIR/chrome-unpack" -name manifest.json | head -1)")"
+  if [[ -z "$SERVER_SRC" || -z "$CHROME_SRC" ]]; then
+    echo "Error: could not find server/ or chrome-extension/ in release zips." >&2
+    exit 1
+  fi
+  SERVER_DIR="$EXTENSIONS_DIR/server"
+  CHROME_EXT_DIR="$EXTENSIONS_DIR/chrome-extension"
+  rm -rf "$SERVER_DIR" "$CHROME_EXT_DIR"
+  cp -r "$SERVER_SRC" "$SERVER_DIR"
+  cp -r "$CHROME_SRC" "$CHROME_EXT_DIR"
+  echo "Installed from GitHub release to $EXTENSIONS_DIR"
 fi
 
-# ── 4. Register native messaging manifests ────────────────────────────────────
+# ── Install Playwright dependencies ───────────────────────────────────────────
 
+chmod +x "$SERVER_DIR/run-host.sh"
+
+export PLAYWRIGHT_BROWSERS_PATH
+mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+
+echo "Installing npm dependencies..."
+cd "$SERVER_DIR"
+if [[ -f package-lock.json ]]; then
+  npm ci --omit=dev
+else
+  npm install --omit=dev
+fi
+
+echo "Downloading Playwright Chromium (~170 MB, one time)..."
+npx playwright install chromium
+
+# ── Register native messaging manifest ────────────────────────────────────────
+
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 if [[ "$OS" == "darwin" ]]; then
   CHROME_NM_DIRS=(
     "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
     "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
   )
-  FIREFOX_NM_DIR="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts"
 else
   CHROME_NM_DIRS=(
     "$HOME/.config/google-chrome/NativeMessagingHosts"
     "$HOME/.config/chromium/NativeMessagingHosts"
   )
-  FIREFOX_NM_DIR="$HOME/.mozilla/native-messaging-hosts"
 fi
 
+HOST_SCRIPT="$SERVER_DIR/run-host.sh"
+REGISTERED=0
 for DIR in "${CHROME_NM_DIRS[@]}"; do
   if [[ -d "$(dirname "$DIR")" ]]; then
     mkdir -p "$DIR"
     cat > "$DIR/$HOST_NAME.json" <<EOF
 {
   "name": "$HOST_NAME",
-  "description": "Article to PDF native messaging host",
-  "path": "$BINARY_PATH",
+  "description": "Article to PDF Playwright native host",
+  "path": "$HOST_SCRIPT",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://${CHROME_EXT_ID}/"]
 }
 EOF
+    REGISTERED=$((REGISTERED + 1))
   fi
 done
 
-mkdir -p "$FIREFOX_NM_DIR"
-cat > "$FIREFOX_NM_DIR/$HOST_NAME.json" <<EOF
-{
-  "name": "$HOST_NAME",
-  "description": "Article to PDF native messaging host",
-  "path": "$BINARY_PATH",
-  "type": "stdio",
-  "allowed_extensions": ["$FIREFOX_EXT_ID"]
-}
-EOF
+if [[ "$REGISTERED" -eq 0 ]]; then
+  echo "Warning: no Chrome/Chromium config directory found. Open Chrome once, then re-run install.sh." >&2
+fi
 
-# ── 5. Done ───────────────────────────────────────────────────────────────────
+# ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "Installation complete. Load the extension in your browser:"
+echo "Installation complete."
 echo ""
-echo "  Chrome:  chrome://extensions → Enable Developer mode → Load unpacked → $CHROME_EXT_DIR"
-echo "  Firefox: about:debugging → Load Temporary Add-on → $FIREFOX_EXT_DIR/manifest.json"
+echo "Next steps:"
+echo "  1. Open chrome://extensions"
+echo "  2. Enable Developer mode"
+echo "  3. Load unpacked → $CHROME_EXT_DIR"
+echo ""
+echo "Usage: click the extension icon or right-click a page → Save page as article PDF"
+echo ""
+echo "No npm start required — Chrome launches Playwright automatically on each PDF."
+echo "Logs: /tmp/article-to-pdf.log"
+if [[ "$DEV_MODE" == true ]]; then
+  echo ""
+  echo "Dev mode: after editing server/ or chrome-extension/, reload the extension in Chrome."
+  echo "Re-run ./install.sh --dev only if native host registration needs refreshing."
+fi

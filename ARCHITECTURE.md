@@ -2,105 +2,121 @@
 
 ## Overview
 
-Article-to-PDF is a **local-only** tool with **no server process**. The browser extension communicates directly with a Go binary via Chrome/Firefox Native Messaging. The binary is spawned on demand and exits when done.
+Article-to-PDF is a **Chrome extension** plus a **Playwright native messaging host**. Chrome spawns the host on demand when you click Download. There is no `npm start`, no port, and no background daemon.
 
 ```
-User clicks extension
+User clicks extension or context menu
         │
         ▼
-chrome.runtime.sendNativeMessage("com.digg.articlepdf", { url })
-        │  browser spawns binary on demand
+  background.js
+        │  chrome.cookies.getAll({ url })
+        │  chrome.runtime.sendNativeMessage("com.digg.articlepdf", { url, cookies })
+        │  Chrome spawns server/run-host.sh → node host.mjs
         ▼
-  Go binary (article-to-pdf-host)
-        │  launches headless Chrome via CDP (chromedp)
-        │  → navigates to URL
-        │  → injects DOM cleanup JS (prepareArticleView)
-        │  → Page.printToPDF via CDP
-        │  → writes PDF to OS temp dir
-        │  → returns { ok: true, path: "/tmp/article-123.pdf" }
+  Playwright headless Chromium (bundled)
+        │  inject cookies → navigate → wait for content
+        │  scroll for lazy images → prepareArticleJS
+        │  page.pdf() → A4
+        │  serve PDF via one-shot http://127.0.0.1:<port>/
         ▼
-Extension calls chrome.downloads.download({ url: "file://...", saveAs: true })
+  chrome.downloads.download({ url, saveAs: true })
         │
         ▼
-Native OS Save dialog  ←  user picks download location
+  host process exits (~30 s after response)
 ```
-
-No port. No `npm start`. No background daemon.
 
 ---
 
-## Components
+## Repository layout
 
-### Native Host — `native-host/main.go`
+| Path | Purpose |
+|------|---------|
+| `chrome-extension/` | Manifest V3 extension — UI, cookies, native messaging client |
+| `server/` | Node/Playwright native messaging host |
+| `install.sh` | Copies files, runs `npm ci`, `playwright install chromium`, registers native host |
+| `uninstall.sh` | Removes `~/.local/share/article-to-pdf` and native messaging manifests |
 
-Single Go binary, compiled with `CGO_ENABLED=0` for a fully static build.
+Installed artifacts (default locations):
 
-**Responsibilities:**
-1. Read one JSON message from stdin (native messaging protocol: 4-byte LE length + JSON)
-2. Validate URL (http/https only)
-3. Find system Chrome/Chromium
-4. Launch Chrome headless via `chromedp`, connect over CDP
-5. Navigate to URL, wait for `body`
-6. Inject `prepareArticleView` JS — strips nav/footer/modals, scores and extracts main content, applies print-optimised styles
-7. Call `Page.printToPDF` (A4, 0.5 in margins, background printing on)
-8. Write PDF to `os.TempDir()`
-9. Write JSON response to stdout: `{"ok": true, "path": "..."}` or `{"ok": false, "error": "..."}`
-10. Exit
+| Artifact | Path |
+|----------|------|
+| Extension copy | `~/.local/share/article-to-pdf/chrome-extension/` |
+| Playwright host | `~/.local/share/article-to-pdf/server/` |
+| Playwright Chromium | `~/.local/share/article-to-pdf/playwright-browsers/` |
+| Native messaging manifest | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.digg.articlepdf.json` (macOS) |
 
-**Dependency:** `github.com/chromedp/chromedp` — CDP client. Uses the system Chrome; does not bundle a browser.
+---
 
-### Chrome Extension — `chrome-extension/`
+## Chrome extension
 
-Manifest V3. Extension ID is fixed at **`jfcifebaiplehpcoijaggkhmejmjaafp`**, derived from the RSA public key embedded in `manifest.json` (`key` field). This means the ID is the same for every user who loads the extension, so `install.sh` can hardcode it in the native messaging manifest without any user action.
+Fixed extension ID: **`jfcifebaiplehpcoijaggkhmejmjaafp`** (RSA `key` in `manifest.json`). This ID is hardcoded in the native messaging manifest so `install.sh` works without per-user configuration.
 
 | File | Role |
 |------|------|
-| `manifest.json` | Declares `nativeMessaging` permission; contains fixed `key` |
-| `popup.html/js` | Toolbar popup — auto-fills current tab URL, sends message to background |
-| `background.js` | Service worker — calls `sendNativeMessage`, then `downloads.download({saveAs:true})` |
-
-### Firefox Extension — `firefox-extension/`
-
-Identical structure, uses `browser.*` (Promise-based WebExtensions API). Fixed ID `article-to-pdf@local` set via `browser_specific_settings.gecko.id` in `manifest.json`.
+| `manifest.json` | Permissions: `nativeMessaging`, `cookies`, `downloads`, `contextMenus`, `host_permissions` |
+| `background.js` | Reads cookies, sends native message, triggers download |
+| `popup.html/js` | Pre-fills current tab URL, sends `{ type: "download", url }` |
 
 ---
 
-## Content Extraction (`prepareArticleView`)
+## Playwright native host
 
-Injected as a JS string via CDP `Runtime.evaluate`:
+| File | Role |
+|------|------|
+| `run-host.sh` | Wrapper Chrome executes; sets `PLAYWRIGHT_BROWSERS_PATH`, runs `host.mjs` |
+| `host.mjs` | Chrome Native Messaging protocol (4-byte LE length + JSON on stdin/stdout) |
+| `generate-pdf.mjs` | Launches Playwright, injects cookies, generates PDF |
+| `prepare-article.mjs` | Article extraction and scroll scripts (evaluated in page context) |
 
-1. Remove `header`, `nav`, `footer`, `aside`, cookie/consent/modal/newsletter/subscribe banners, fixed-position elements
-2. Score candidate containers (`article`, `main`, `[role=main]`, common class names) by text length + (paragraph count × 300) + (image count × 150)
-3. Clone the highest-scoring element
-4. Strip scripts, styles, forms, buttons, hidden elements
-5. Remove all non-essential attributes (keep: `src`, `srcset`, `alt`, `href`, `colspan`, `rowspan`)
-6. Replace `document.body` with a clean, print-optimised layout
+### Native messaging protocol
+
+**Request** (extension → host):
+
+```json
+{ "url": "https://example.com/article", "cookies": [ /* chrome.cookies objects */ ] }
+```
+
+**Response** (host → extension):
+
+```json
+{ "ok": true, "url": "http://127.0.0.1:12345/article.pdf", "filename": "article.pdf" }
+```
+
+```json
+{ "ok": false, "error": "message" }
+```
+
+Large PDFs are served via a one-shot localhost HTTP server to avoid Chrome's ~1 MB native messaging limit.
+
+Playwright uses **bundled Chromium**, not the user's `Google Chrome.app`, avoiding macOS App Management prompts.
 
 ---
 
-## Distribution
+## Content extraction
 
-### GitHub Releases
+`prepare-article.mjs` exports three scripts injected via Playwright `page.evaluate`:
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
-- Cross-compiles `article-to-pdf-host` for: `darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`, `windows/amd64`
-- Creates a GitHub Release with the binaries, `install.sh`, and `uninstall.sh` as assets
+1. **Wait for content** — polls text length until async content (Substack, Medium) stops growing
+2. **Scroll for images** — scrolls the page to trigger lazy-loaded images
+3. **Prepare article** — scores content containers, clones the best match, strips nav/ads/comments/share blocks, rebuilds a print-friendly page
 
-All third-party actions are pinned to immutable commit SHAs (not tags) to prevent supply-chain attacks.
+---
 
-### Install flow (end user)
+## Authentication
 
-```
-curl -fsSL .../releases/latest/download/install.sh | bash
-```
+The extension calls `chrome.cookies.getAll({ url })` and passes the result to the native host. Playwright injects cookies into a fresh browser context before `page.goto()`. HttpOnly session cookies are included.
 
-`install.sh`:
-1. Detects OS and CPU architecture
-2. Downloads the matching binary from GitHub Releases (falls back to building locally if run from a clone)
-3. Places binary in `~/.local/bin/article-to-pdf-host`
-4. Writes native messaging manifests for Chrome and Firefox with the hardcoded extension IDs
+This enables Substack paid posts and similar authenticated content without tab duplication or sharing Chrome's profile directory.
 
-No Go installation, no `git clone`, no file editing required.
+---
+
+## Install modes
+
+| Command | Behavior |
+|---------|----------|
+| `./install.sh` | Copy to `~/.local/share/article-to-pdf/`, install deps, register native host |
+| `./install.sh --dev` | Register native host pointing at repo `server/`; load extension from repo directly |
+| `curl …/install.sh \| bash` | Download latest release assets and install |
 
 ---
 
@@ -108,8 +124,19 @@ No Go installation, no `git clone`, no file editing required.
 
 | Component | Dependency | Purpose |
 |-----------|-----------|---------|
-| Native host | `chromedp` | CDP client — drives Chrome headless |
-| Native host | System Chrome/Chromium | Rendering and PDF generation |
-| Extension | — | None (plain JS, no build step) |
+| Host | Node.js 18+ | Runtime |
+| Host | Playwright | Headless Chromium + PDF |
+| Extension | Chrome APIs | Cookies, native messaging, downloads |
 
-No Node.js. No npm. No Python. No server.
+No Go. No Firefox. No long-running server.
+
+---
+
+## Release
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which publishes:
+
+- `chrome-extension.zip`
+- `server.zip`
+- `install.sh`
+- `uninstall.sh`

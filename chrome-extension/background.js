@@ -1,9 +1,9 @@
 const HOST_NAME = "com.digg.articlepdf";
 const MENU_ID = "article-to-pdf-save-page";
 
-function sendToHost(url) {
+function sendToHost(payload) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendNativeMessage(HOST_NAME, { url }, (response) => {
+    chrome.runtime.sendNativeMessage(HOST_NAME, payload, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
       } else if (!response?.ok) {
@@ -15,12 +15,24 @@ function sendToHost(url) {
   });
 }
 
+async function cookiesForUrl(url) {
+  try {
+    return await chrome.cookies.getAll({ url });
+  } catch {
+    return [];
+  }
+}
+
 async function downloadArticlePdf(articleUrl) {
-  const { data, filename } = await sendToHost(articleUrl);
-  // Use a data URL — Chrome handles these reliably with downloads API
-  const dataUrl = "data:application/pdf;base64," + data;
+  if (!articleUrl?.startsWith("http")) {
+    throw new Error("Invalid or missing URL");
+  }
+
+  const cookies = await cookiesForUrl(articleUrl);
+  const { url, filename } = await sendToHost({ url: articleUrl, cookies });
+
   await chrome.downloads.download({
-    url: dataUrl,
+    url,
     filename: filename || "article.pdf",
     saveAs: true,
   });

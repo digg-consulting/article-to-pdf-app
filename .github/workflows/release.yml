@@ -9,70 +9,23 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }}-${{ matrix.arch }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - os: darwin
-            arch: amd64
-          - os: darwin
-            arch: arm64
-          - os: linux
-            arch: amd64
-          - os: linux
-            arch: arm64
-          - os: windows
-            arch: amd64
-
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: native-host/go.mod
-
-      - name: Build
-        working-directory: native-host
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: "0"
-        run: |
-          EXT=""
-          [[ "${{ matrix.os }}" == "windows" ]] && EXT=".exe"
-          go build -ldflags="-s -w" -o "article-to-pdf-host-${{ matrix.os }}-${{ matrix.arch }}${EXT}" .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: binary-${{ matrix.os }}-${{ matrix.arch }}
-          path: native-host/article-to-pdf-host-*
-
   release:
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          path: dist
-          merge-multiple: true
+      - name: Zip extension
+        run: zip -r chrome-extension.zip chrome-extension/
 
-      - name: Zip extensions
-        run: |
-          zip -r dist/chrome-extension.zip chrome-extension/
-          zip -r dist/firefox-extension.zip firefox-extension/
+      - name: Zip server
+        run: zip -r server.zip server/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
-            dist/article-to-pdf-host-*
-            dist/chrome-extension.zip
-            dist/firefox-extension.zip
+            chrome-extension.zip
+            server.zip
             install.sh
             uninstall.sh
           generate_release_notes: true

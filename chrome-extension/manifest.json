@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Article to PDF",
-  "version": "2.0.0",
-  "description": "Save the current article as a clean PDF using a local native helper.",
+  "version": "4.0.0",
+  "description": "Save any web article as a clean PDF via Playwright — article only, with your browser session.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxpeK/fVKMQ/T6cHUO+h+b1G0df9WZJ122myp3n9GM3Clv7CW6j7iiYQmeCIsa6qIoWtQqolWAoIBR3kpJIATWX8cPJRc4AV0ld214w45tgDO6FWdk1/k4VPvtoztl3tsYHWYMbbmg3zh6hgrNVWfxzivKICZY3SJ3ujYIiNz+k4DWmCoi5ImdYItU1QG+UQHI+cDp4Sp8X2CKwn9x2eMvtGWaE1fyWxU931Y2wBgRWdW1GIfAiDOzjVF5KDRqE4z2iqHsZz8OCqECxn7G6nwl8InD5vD4KMOhhOaSoWm+WhF8w6NFxJ69xFEAZ+cXOPU3QWn/4OOzyKUUdYFhHr+jwIDAQAB",
   "icons": {
     "16": "icon16.png",
@@ -20,5 +20,12 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["activeTab", "tabs", "downloads", "nativeMessaging", "contextMenus"]
+  "permissions": [
+    "activeTab",
+    "cookies",
+    "downloads",
+    "nativeMessaging",
+    "contextMenus"
+  ],
+  "host_permissions": ["https://*/*", "http://*/*"]
 }

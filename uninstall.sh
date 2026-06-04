@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# uninstall.sh — removes the article-to-pdf native messaging host
+# uninstall.sh — removes the Playwright host, extension copy, and native messaging manifests
 set -euo pipefail
 
 HOST_NAME="com.digg.articlepdf"
-BINARY_PATH="${INSTALL_DIR:-$HOME/.local/bin}/article-to-pdf-host"
-
+EXTENSIONS_DIR="${EXTENSIONS_DIR:-$HOME/.local/share/article-to-pdf}"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
 if [[ "$OS" == "darwin" ]]; then
@@ -12,24 +11,13 @@ if [[ "$OS" == "darwin" ]]; then
     "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
     "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
   )
-  FIREFOX_NM_DIR="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts"
 else
   CHROME_NM_DIRS=(
     "$HOME/.config/google-chrome/NativeMessagingHosts"
     "$HOME/.config/chromium/NativeMessagingHosts"
   )
-  FIREFOX_NM_DIR="$HOME/.mozilla/native-messaging-hosts"
 fi
 
-# Remove binary
-if [[ -f "$BINARY_PATH" ]]; then
-  rm -f "$BINARY_PATH"
-  echo "Removed $BINARY_PATH"
-else
-  echo "Binary not found at $BINARY_PATH (already removed?)"
-fi
-
-# Remove Chrome/Chromium manifests
 for DIR in "${CHROME_NM_DIRS[@]}"; do
   MANIFEST="$DIR/$HOST_NAME.json"
   if [[ -f "$MANIFEST" ]]; then
@@ -38,13 +26,12 @@ for DIR in "${CHROME_NM_DIRS[@]}"; do
   fi
 done
 
-# Remove Firefox manifest
-MANIFEST="$FIREFOX_NM_DIR/$HOST_NAME.json"
-if [[ -f "$MANIFEST" ]]; then
-  rm -f "$MANIFEST"
-  echo "Removed $MANIFEST"
+if [[ -d "$EXTENSIONS_DIR" ]]; then
+  rm -rf "$EXTENSIONS_DIR"
+  echo "Removed $EXTENSIONS_DIR (extension copy, server, Playwright browsers)"
+else
+  echo "Nothing installed at $EXTENSIONS_DIR"
 fi
 
 echo ""
-echo "Uninstall complete."
-echo "Remember to remove the extension from chrome://extensions and about:addons."
+echo "Remove the extension from chrome://extensions if still loaded."

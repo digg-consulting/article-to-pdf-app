@@ -1,5 +1,8 @@
-# Go build output
-native-host/article-to-pdf-host
-
 # macOS
 .DS_Store
+
+# Local test output
+*.pdf
+
+# Node (server host)
+server/node_modules/
